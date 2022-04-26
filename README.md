@@ -1,13 +1,17 @@
 # PublicEcon_seminar
-The data is collected from [Datafordeler.dk](https://datafordeler.dk/)
-See the GeoDanmark-vejledning-til-Datafordeleren-v1 file that is a guide about how to access the data. (Danish)
+The data is collected using a webscaper.
+The webscraper ´bolig_scaper_final.py´ relies on ´selenium´, ´geopy´ , ´pandas´, ´requests´ and ´numpy´. 
+I recommend VS Code to run the scraper.
 
-The raw data set is the Danish BBR register (Bolig og Bygnings Register = House and Buildings Register).
+The dataset contains information on houseprices, type of sale, size and much more.
 
-See an [Overwiev of the full data set here](http://grunddatamodel.datafordeler.dk/).
+The dataset is then cleaned and prepared in the jupyter notebook ´Municipal_borders.ipynb´. The notebook imports data from DAWA on municipal geolocations and calls on data on Grundskylds promillen (land tax promille) that is collected [https://skat.dk/SKAT.aspx?oID=2113673](here), and prepared in an excel file.
 
-Since the Dataset is a large one about 6 520 758 000 lines in JSON format and uses 247.281 GB menory, it is splitted into 15 files with max 434 717 lines in each. Using SplitTextFile, that can be downloaded [here](https://www.withdata.com/big-text-file-splitter/download.html).
+The notebook relies on ´requests´, ´geopandas´, ´pandas´, ´numpy´, ´sympy´, ´shapely´ and ´folum´.
 
-The Splitted files are then edited such that the dictionary is loadable.
+The cleaned data is then collected as a pandas dataframe.
+
+The data analysis is then caried out in the last notebook ´analysis.ipynb´.
+
 
 
