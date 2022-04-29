@@ -1,0 +1,791 @@
+# Import warnings library
+import warnings 
+# Set action = "ignore" to ignore warnings
+warnings.filterwarnings(action= 'ignore')
+
+from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.keys import Keys
+import re
+from bs4 import BeautifulSoup, SoupStrainer
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import pandas as pd
+import time
+from datetime import datetime
+import requests
+import numpy as np
+from lxml import html
+from tqdm import tqdm
+from threading import Thread
+import smtplib
+import imghdr
+
+def send_mail(data_name):
+    from email.message import EmailMessage
+    EMAIL_ADDRESS = 'fraekfyr91@gmail.com'
+    EMAIL_PASSWORD = 'Anemone123'
+
+    msg = EmailMessage()
+    msg['Subject'] = 'Updates'
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = 'laustruplasse@gmail.com'
+    msg.set_content('Updates from scaper')
+
+    with open(data_name, 'rb') as f:
+        file_data = f.read()
+        file_type = 'csv'
+        file_name = f.name
+
+    msg.add_attachment(file_data, maintype= file_type, subtype= file_type, filename = file_name)
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+
+        smtp.login(EMAIL_ADDRESS ,EMAIL_PASSWORD )
+        smtp.send_message(msg)
+        
+        
+        
+def remove_punctuation(pattern,phrase): 
+    '''   
+
+    Args: 
+        Regular expression pattern
+        
+        String phrase
+    Returns:
+        String phrase with out punctation
+    '''
+    
+    
+    for pat in pattern: 
+        return(re.findall(pat,phrase)) 
+def month_con(m):
+    '''   
+
+    Args: 
+        List or string of mounth indication by first three letters
+    Returns:
+        list or string where the mounth is translated into the mounth index
+    '''    
+    if m.__contains__('jan'):
+        m = '01'
+    elif m.__contains__('feb'):
+        m = '02'
+    elif m.__contains__('mar'):
+        m = '03'
+    elif m.__contains__('apr'):
+        m = '04'
+    elif m.__contains__('maj'):
+        m = '05'
+    elif m.__contains__('jun'):
+        m = '06' 
+    elif m.__contains__('jul'):
+        m = '07'
+    elif m.__contains__('aug'):
+        m = '08'
+    elif m.__contains__('sep'):
+        m = '09'
+    elif m.__contains__('okt'):
+        m = '10'
+    elif m.__contains__('nov'):
+        m = '11'
+    elif m.__contains__('dec'):
+        m = '12'
+    else:
+        pass
+    return m    
+
+def tim(result, index, fun, j):
+    '''
+        Create a result of the threads
+    Args:
+        >> result (list): Empty list with len j number of rows
+        >> j (Pandas Dataframe): Should be a Pandas DataFrame of a feasible chunck size.
+        >> index (int): Iteration number from loop to store the result and call row number
+        >> fun (function): The objective function to compute
+    Returns:
+        updated result with computed values
+    '''
+    result[index] = fun(j.iloc[index])
+def treads(j, fun):
+    '''
+    Create threads that runs a function in j dimentions at the same time.
+    Args:
+        >> j (Pandas Dataframe): Should be a Pandas DataFrame of a feasible chunck size.
+        >> fun (function): The objective function to compute
+
+    Returns:
+        The computed function
+    '''
+    threads = [None] * j.shape[0] # initialize the number of threads as the number of rows in j
+    results = [None] * j.shape[0] # initialize the result as the number of rows in j
+
+    for i in range(len(threads)):
+        threads[i] = Thread(target=tim, args=(results, i, fun, j)) # create threads, target tim takes the objective funtion as argument
+        threads[i].start() # starts thread
+
+    for i in range(len(threads)):
+        threads[i].join() # Join treads such that the result can be returned together
+
+    return results
+
+def parse_stuff(lst):
+    '''
+    Helping function to clean data
+    Args:
+            >> lst (list): list of output from scaper
+        Returns:
+            String with last words from string.
+    '''
+    for i in lst:
+        l=i[0].split(' ')
+           
+        return ' '.join(l[3:-1])
+def parse_stuff2(lst):
+    '''
+    Helping function to clean data
+    Args:
+        >> lst (list): list of output from scaper
+        Returns:
+            list with last words from initial elements in input list
+    '''
+    temp = []
+    for i in lst:
+        l=i[0].split(' ')
+        temp.append(' '.join(l[3:-1]))
+    return temp
+
+def repeat(n, zip_start, zip_end, url):
+    '''   
+    Args: 
+        Int
+    Returns:
+        Repeat of a function n number of times
+    '''
+
+    #creating data containers
+    adresse = [] 
+    href = []
+    salgsdato = []
+    count = 0
+    # open selenium and setting options
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(options=chrome_options)
+    #driver
+    driver = webdriver.Chrome(executable_path=r"C:\Users\45238\Documents\Programmering\chromedriver.exe")
+    #open url
+    driver.get(url)
+    #accept cookies
+    driver.find_element_by_xpath('//*[@id="coiPage-1"]/div[2]/div[1]/button[2]').click()
+
+    while count < n+1:
+        time.sleep(1)
+        soup = BeautifulSoup(driver.page_source, 'lxml')
+        #find all adresses
+        adr = soup.find_all('a',{'class':'text-primary font-weight-bolder text-left'})
+ 
+        for i in adr:    
+            adresse.append(i.text)#append addr
+        ref =  soup.find_all('a', href=True) # find links
+        for i in ref:
+            if i['href'][:6] == '/salg/':
+                href.append('https://www.boliga.dk/'+str(i['href'])) #append link
+            else: pass
+
+                #find all rows    
+        row = soup.find_all('td',{'class':'table-col text-center'})
+        temp_list = []
+        #selecting columns
+        for i in row:
+            element = i.text   
+            #spilt by line shift
+            cell = re.split('\n', element)
+            temp_list.append(cell)
+
+        for i in temp_list[1::7]:
+            sal = str(i)
+            #removing punctation
+            sal= "".join(remove_punctuation(['[^!.?]+'],sal))
+            #splitting the sttring by space
+            sal = sal.split(' ')
+            #joining strings by a -
+            joined_string = "-".join(sal)
+            date= joined_string[2:12]
+            salgsdato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+
+        count += 1
+        try:
+            #click the next bottom
+            search = driver.find_element_by_xpath('/html/body/app-root/app-scroll-position-restoration/app-main-layout/app-sold-properties-list/div[3]/div/div/app-pagination/div/div[4]/a')
+            search.click()
+
+        except: pass
+    return adresse, href, salgsdato
+        
+def bolig_salg(zip_start, zip_end):
+    
+    '''
+    Args: 
+        Start and end zip codes
+    Returns:
+        Pandasdataframe with addr and link
+    '''    
+    
+    #the website
+    url = 'https://www.boliga.dk/salg/resultater?zipcodeFrom=' + str(zip_start) + '&zipcodeTo=' + str(zip_end) + '&street=&page=1&sort=date-d'
+    #soup 
+    
+    soup = BeautifulSoup(requests.get(url).text, 'lxml')
+    # text in next bottom
+    buttoms = soup.find_all('a',{'class':'page-button'})
+    try:
+        condition = int(buttoms[-2].text) # find the number of pages
+    except:
+        condition = 0 # else no more pages
+    #call the scaper
+    adresse, href, salgsdato =repeat(condition, zip_start = zip_start, zip_end = zip_end, url = url)
+    #creating the dataframe 
+    df = pd.DataFrame(list(zip(adresse, href, salgsdato )),
+               columns=['Adresse', 'href', 'salgsdato'])
+    df.drop_duplicates()
+    return df
+
+
+def hist(j):
+    '''
+    Args: 
+        j (Pandas DataFrame): pandas dataframe containing addr and links
+    Returns:
+        Same DataFrame but add a column with links to bbr page
+    '''    
+    df_new = pd.DataFrame() # initialize dataframe
+    page = ''
+    while page == '':
+        try:
+            # call soup
+            soup = BeautifulSoup(requests.get(j.href).text, 'lxml')
+            # find rows
+            row = soup.find_all('tr',{'class':'table-row'})
+            # get hrefs for BBR info
+            href2 = []
+            ref =  soup.find_all('a', href=True) #find links
+            for i in ref:
+
+                if i['href'][:9] == '/bbrinfo/':
+                    href2.append('https://www.boliga.dk/'+str(i['href'])) # append links
+
+                else: pass
+            new_row = {'Adresse':j.Adresse, 'href':j.href, 'hrefbbr': href2[0]} # append row to dataframe
+            df_new = df_new.append(new_row, ignore_index=True)
+            df_new.drop_duplicates()
+            break
+        except:
+            time.sleep(5)
+            continue
+    return df_new
+
+    
+def get_hist(df, num):
+    '''
+    This function calls hist, that scapes the link for bbr.
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr and links
+        num (int): number of threads to divide the task into
+    Returns:
+        Same DataFrame but add a column with links to bbr page
+    '''    
+    df_new = pd.DataFrame() # new container
+    for j in chunker(df,num): # chunk the dataframe into num amount of rows
+        dat = treads(j, hist) # create threads and scrape
+        for i in dat:
+            for k, j in i.iterrows():
+                df_new = df_new.append(j, ignore_index=True) # unpacking solution and store in container
+
+    return df_new
+
+def data(j):
+    '''
+    This function scapes bbr tables
+
+    Args: 
+        j (DataFrame): Dataframe in a feasible chunksize containing addr and links and hrefs
+    Returns:
+        Same DataFrame but add a columns with values from bbr
+    '''    
+    df_new = pd.DataFrame() # initialize dataframe
+    page = ''
+    while page == '':
+        try:
+            # call selenium
+            chrome_options = Options() # set options
+            chrome_options.add_argument("--headless") # run selenium headless
+            driver = webdriver.Chrome(executable_path=r"C:\Users\45238\Documents\Programmering\chromedriver.exe") # open selenium
+            driver.get(j.hrefbbr)
+            driver.implicitly_wait (10) 
+            #base_url = j.hrefbbr
+
+            #soup = BeautifulSoup(requests.get(base_url).text, 'lxml')
+            try:
+                driver.find_element_by_xpath('//*[@id="coiPage-1"]/div[2]/div[1]/button[2]').click() #click cookie
+                driver.implicitly_wait (10) # wait to response
+            except:
+                pass
+
+            soup = BeautifulSoup(driver.page_source, 'lxml') # call soup
+            # First table
+            tab1 = soup.find_all('div',{'class':'col-md-6 column'})
+            temp_list = [] # data container
+            for i in tab1:
+                cell = re.split('\n', i.text) # split by new line
+                temp_list.append(cell) # append cells
+            # get the data using the helping function parse_stuff
+            BOLIGTYPE = parse_stuff(temp_list[0::11])
+            KØKKENFORHOLD = parse_stuff(temp_list[1::11])
+            ANVENDELSE = parse_stuff(temp_list[2::11])
+            BADEFORHOLD = parse_stuff(temp_list[3::11])
+            ENHEDSAREAL = re.sub("\D", "", parse_stuff(temp_list[4::11]))
+            ANTAL_BADEVÆRELSER = parse_stuff(temp_list[5::11])
+            BEBOELSESAREAL =re.sub("\D", "", parse_stuff(temp_list[6::11])) 
+            TOILETFORHOLD = parse_stuff(temp_list[7::11])
+            VÆRELSER = parse_stuff(temp_list[8::11])
+            ANTAL_TOILETTER = parse_stuff(temp_list[9::11])
+            ENERGIKODE = parse_stuff(temp_list[10::11])
+
+            #soup = BeautifulSoup(requests.get(base_url + '#info-ownership').text, 'lxml')
+            # new table ejerskab
+            driver.find_element_by_xpath('//*[@id="btnpic-1"]/span').click() # click fan
+            driver.implicitly_wait (10) # wait untill responce
+            soup = BeautifulSoup(driver.page_source, 'lxml') # call soup
+            # find table values
+            tab2 = soup.find_all('span',{'class':'value'})
+            EJENDOMSNUMMER = []; KOMMUNENUMMER =  [] # data containers
+            for i in tab2:
+                if len(i.text)> 5:
+                    EJENDOMSNUMMER.append(i.text) # append data
+                else:
+                    KOMMUNENUMMER.append(i.text) # append data
+
+            #new table bygning
+            #soup = BeautifulSoup(requests.get(base_url + '#info-building').text, 'lxml')
+            
+            driver.find_element_by_xpath('//*[@id="btnpic-2"]/span').click() # click fan
+            driver.implicitly_wait (10) # wait till response
+            soup = BeautifulSoup(driver.page_source, 'lxml') # call soup
+            #Find the table
+            tab3 = soup.find_all('div',{'class':'block'}) 
+            temp_list2 =[] # data container
+            for i in tab3:
+                cell= re.split('\n', i.text) # spilt by newline
+                temp_list2.append(cell)     # store cells
+            
+            # get the table values using helping function parse_stuff     
+            BYGNINGSNUMMER = parse_stuff(temp_list2[0::17])
+            YDERVÆG = parse_stuff(temp_list2[1::17])
+            ANVENDELSE = parse_stuff(temp_list2[2::17])
+            TAG = parse_stuff(temp_list2[3::17])
+            BOLIGSTØRRELSE_BBR =  re.sub("\D", "", temp_list2[4::17][0][0])
+            CARPORT = re.sub("\D", "", parse_stuff(temp_list2[5::17]))
+            BOLIGSTØRRELSET_TINGLYST = re.sub("\D", "", parse_stuff(temp_list2[6::17]))
+            UDHUS = re.sub("\D", "", parse_stuff(temp_list2[7::17]))
+            BOLIGSTØRRELSE = parse_stuff(temp_list[8::17])
+            BOLIGENHED_MED_EGET_KØKKEN = re.sub("\D", "", parse_stuff(temp_list2[9::17]))
+            VARMEINSTALLATION = parse_stuff(temp_list2[10::17])
+            BOLIGENHED_UDEN_EGET_KØKKEN =re.sub("\D", "", parse_stuff(temp_list2[11::17]))
+            OBJEKT_STATUS = parse_stuff(temp_list2[12::17])
+            AFVIGENDE_ETAGER = parse_stuff(temp_list2[13::17])
+            SENESTE_OMBYGNING = parse_stuff(temp_list2[14::17])
+            ETAGER = parse_stuff(temp_list2[15::17])
+            noter = parse_stuff(temp_list2[16::17])
+            
+            try: # not all houses have this
+                # Tilhørende bygninger
+                #soup = BeautifulSoup(requests.get(base_url + '#info-additionalBuildings').text, 'lxml')
+                
+                driver.find_element_by_xpath('//*[@id="btnpic-4"]').click() # click fan
+                driver.implicitly_wait (10) # wait untill response
+                soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+                # find table
+                tab = soup.find_all('div',{'class':'block'})
+                temp_list2 =[] # data container
+                for i in tab:
+                    cell= re.split('\n', i.text) # split by newline
+                    temp_list2.append(cell) # store cell data
+                # create dictionary
+                tilhørende_bygninger = {'ejendomsnummer': [], 'byggeår': [], 'anvendelse':[],
+                                            'ydervæg':[],'boligstørrelse':[], 'tag': [],
+                                        'seneste ombygningsår':[]}  
+                # Store the data using regex for digits and the helping function parse_stuff for stings
+                for i in temp_list2[0::7]:
+                    tilhørende_bygninger['ejendomsnummer'].append(float( re.sub("\D", "", i[0])))
+                for i in temp_list2[1::7]:
+                    tilhørende_bygninger['byggeår'].append(int( re.sub("\D", "", i[0])))
+                for i in temp_list2[2::7]:
+                    tilhørende_bygninger['anvendelse'].append(parse_stuff(i[0]))
+                for i in temp_list2[3::7]:
+                    tilhørende_bygninger['ydervæg'].append(parse_stuff(i[0]))
+                for i in temp_list2[4::7]:
+                    tilhørende_bygninger['boligstørrelse'].append(float( re.sub("\D", "", i[0])))
+                for i in temp_list2[5::7]:
+                    tilhørende_bygninger['tag'].append(parse_stuff(i[0])) 
+                for i in temp_list2[6::7]:
+                    tilhørende_bygninger['seneste ombygningsår'].append(float( re.sub("\D", "", i[0])))
+            # empty dictionary if no additional buildings
+            except: tilhørende_bygninger = {'ejendomsnummer': [], 'byggeår': [], 'anvendelse':[],
+                                            'ydervæg':[],'boligstørrelse':[], 'tag': [],
+                                        'seneste ombygningsår':[]}  
+
+            
+            #new table Ejendomsvurderinger_og_skatter
+            #soup = BeautifulSoup(requests.get(base_url + '#info-valueChanges').text, 'lxml')
+
+            driver.find_element_by_xpath('//*[@id="btnpics-1"]').click() # click the fan
+            driver.implicitly_wait (10) # wait til page loaded
+            soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+
+            #Ejendomsvurderinger_og_skatter fan
+            driver.find_element_by_xpath('//*[@id="btnpic-0"]/span').click() # click the fan
+            driver.implicitly_wait (10) # wait till page loaded 
+            soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+            tab4 = soup.find_all('td',{'class':'table-col'})  # get the table
+            temp_list3 = [] # data container
+            for i in tab4:
+                cell = re.split('\n', i.text) # split by new line
+                temp_list3.append(cell) # append cells
+            dic = {'Ændret': [], 'Anvendelse':[],  'Grundareal':[] , 'Grundværdi':[], 'Ejendomsværdi':[]} # initialize dict
+
+            for i in temp_list3[0::5]: # get dates
+                date = remove_punctuation(['[^!.?]+'],i[0][9:11])[0]+'-'+ month_con(remove_punctuation(['[^!.?]+'],i[0][12:16])[0])+'-'+ i[0::5][0][-5:-1]
+                Ændret = datetime.strptime(str(date), '%d-%m-%Y')            
+                dic['Ændret'].append(Ændret) # append dates
+            # get values store them in dict
+            for i in temp_list3[1::5]:
+                dic['Anvendelse'].append(parse_stuff(i[0])) 
+            for i in temp_list3[2::5]:
+                dic['Grundareal'].append(float( re.sub("\D", "", i[0])))
+            for i in temp_list3[3::5]:
+                dic['Grundværdi'].append(float( re.sub("\D", "", i[0])))
+            for i in temp_list3[4::5]:
+                dic['Ejendomsværdi'].append(float( re.sub("\D", "", i[0])))
+
+            #Ejendomsvurderinger_og_skatter
+            #soup = BeautifulSoup(requests.get(base_url + '#info-taxes').text, 'lxml')
+            #info-taxes
+            driver.find_element_by_xpath('//*[@id="btnpic-1"]').click() # click fan
+            driver.implicitly_wait (10) # wait till page load
+            soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+            tab5 = soup.find_all('div',{'class':'w-100'}) # find table
+            for i in tab5:
+                cell= re.split('\n', i.text) #split by newline
+                # find values
+                if cell[0][:18] ==' Ejendomsværdiskat': 
+                    Ejendomsværdiskat =  float(re.sub("\D", "", cell[0]))
+                if cell[0][:11] == ' Grundskyld':
+                    Grundskyld = float(re.sub("\D", "", cell[0]))
+
+            #Tidligere_udbud
+            #soup = BeautifulSoup(requests.get(base_url + '#info-previousAnnouncements').text, 'lxml')
+
+
+            driver.find_element_by_xpath('//*[@id="btnpic-1"]').click() # click fan
+            driver.implicitly_wait (10) # wait til page loaded
+            soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+            tab7 = soup.find_all('td',{'table-col'}) # find table
+            temp_list6 = []  # store data
+            for i in tab7:
+                cell= re.split('\n', i.text) # split by newline
+                temp_list6.append(cell) # store data
+            # store values using helping function parse_stuff2
+            Udbudspris = parse_stuff2(temp_list6[0::4]) 
+            udbudspris = []
+            for i in Udbudspris:
+                udbudspris.append(float( re.sub("\D", "", i)))
+            Sidst_set_dato = parse_stuff2(temp_list6[1::4]) 
+            sidst_set_dato = []
+            for i in Sidst_set_dato:
+                date = remove_punctuation(['[^!.?]+'],i[6:9])[0]+'-'+ month_con(remove_punctuation(['[^!.?]+'],i[9:13])[0])+'-'+ i[-4:]
+                sidst_set_dato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+            Liggetid = parse_stuff2(temp_list6[2::4])
+            liggetid = []
+            for i in Liggetid:
+                liggetid.append(float( re.sub("\D", "", i)))
+
+            #Tidligere_salg 
+            #soup = BeautifulSoup(requests.get(base_url + '#info-sales').text, 'lxml')
+
+            driver.find_element_by_xpath('//*[@id="btnpics-2"]/div[1]').click() # click fan
+            driver.implicitly_wait (10) # wait till page load
+            soup = BeautifulSoup(driver.page_source, 'lxml') # get soup
+            tab6 = soup.find_all('td',{'table-col'}) # find table
+            temp_list5 = [] # data container
+            for i in tab6:
+                cell = re.split('\n', i.text) # split by new line
+                temp_list5.append(cell)  #store cell
+            Omregningsdato = []
+            Salgspris = []
+            ty = [] # data container
+            #find dates
+            for i in temp_list5[0::3]:
+                date = remove_punctuation(['[^!.?]+'],i[0][17:19])[0]+'-'+ month_con(remove_punctuation(['[^!.?]+'],i[0][20:24])[0])+'-'+ i[0][-5:-1]
+                Omregningsdato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+            # store values 
+            for i in temp_list5[1::3]:
+                Salgspris.append(float( re.sub("\D", "", i[0])))
+            for i in temp_list5[2::3]:
+                cell = re.split(' ', i[0])
+                cell= cell[3:-1]
+                ty.append(" ".join(cell))
+            for i, l, k in zip(Omregningsdato,Salgspris,ty): # append values to new row
+                new_row = {'Adresse':j.Adresse , 'Købesum':l, 'Salgsdato':i, 'Salgstype':k, 'href':j.href, 'hrefbbr': j.hrefbbr, 'geo code': j.geo_code, 'geo location raw': j.geo_location_raw,'boligtype': BOLIGTYPE, 'køkkenforhold':KØKKENFORHOLD, 'anvendelse':ANVENDELSE, 'badeforhold':BADEFORHOLD, 'enhedsareal':ENHEDSAREAL, 'antal_badeværelser':ANTAL_BADEVÆRELSER, 'beboelsesareal':BEBOELSESAREAL, 'toiletforhold':TOILETFORHOLD, 'værelser': VÆRELSER, 'antal_toiletter':ANTAL_TOILETTER, 'energikode': ENERGIKODE, 'ejendomsnummer': EJENDOMSNUMMER, 'kommunenummer': KOMMUNENUMMER, 'bygningsnummer': BYGNINGSNUMMER, 'ydervæg': YDERVÆG, 'anvendelse':ANVENDELSE, 'tag': TAG, 'boligstørrelse_BBR': BOLIGSTØRRELSE_BBR, 'carport': CARPORT, 'boligstørrelse_tinglyst': BOLIGSTØRRELSET_TINGLYST, 'udhus': UDHUS, 'boligstørrelse': BOLIGSTØRRELSE, 'boligenhed_med_eget_køkken': BOLIGENHED_MED_EGET_KØKKEN, 'varmeinstallation': VARMEINSTALLATION, 'boligenhed_uden_eget_køkken': BOLIGENHED_UDEN_EGET_KØKKEN, 'objekt_status': OBJEKT_STATUS, 'afvigende_etager': AFVIGENDE_ETAGER, 'seneste_ombygning': SENESTE_OMBYGNING, 'etager': ETAGER, 'noter': noter, 'offentlige_vurderinger' : dic, 'Ejendomsværdiskat': Ejendomsværdiskat, 'Grundskyld': Grundskyld, 'Tilhørende_bygninger': tilhørende_bygninger}
+                df_new = df_new.append(new_row, ignore_index=True) # appending to dataframe
+            driver.close() # close selenium
+            break
+        except Exception as e:
+    
+            if hasattr(e, 'message'):
+                print(e.message)
+            else:
+                print(e)
+            time.sleep(5)
+            new_row = {'Adresse':np.nan , 'Købesum':np.nan, 'Salgsdato':np.nan, 'Salgstype':np.nan, 'href':np.nan, 'hrefbbr': np.nan, 'geo code':np.nan, 'geo location raw': np.nan,'boligtype': np.nan, 'køkkenforhold':np.nan, 'anvendelse':np.nan, 'badeforhold':np.nan, 'enhedsareal':np.nan, 'antal_badeværelser':np.nan, 'beboelsesareal':np.nan, 'toiletforhold':np.nan, 'værelser': np.nan, 'antal_toiletter':np.nan, 'energikode': np.nan, 'ejendomsnummer': np.nan, 'kommunenummer': np.nan, 'bygningsnummer': np.nan, 'ydervæg': np.nan, 'anvendelse':np.nan, 'tag': np.nan, 'boligstørrelse_BBR': np.nan, 'carport': np.nan, 'boligstørrelse_tinglyst': np.nan, 'udhus': np.nan, 'boligstørrelse': np.nan, 'boligenhed_med_eget_køkken': np.nan, 'varmeinstallation': np.nan, 'boligenhed_uden_eget_køkken': np.nan, 'objekt_status': np.nan, 'afvigende_etager': np.nan, 'seneste_ombygning': np.nan, 'etager': np.nan, 'noter': np.nan, 'offentlige_vurderinger' : np.nan, 'Ejendomsværdiskat': np.nan, 'Grundskyld': np.nan, 'Tilhørende_bygninger': np.nan}
+            df_new = df_new.append(new_row, ignore_index=True) # appending to dataframe
+            break
+
+    return df_new
+
+
+def chunker(seq, size):
+    '''
+    Chunks dataframe into fewer rows
+
+    Args: 
+        seq (Pandas DataFrame): pandas dataframe containing addr and links
+        size (int): chunk lenght 
+    Returns:
+        dataframe with size as number of rows
+    '''
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+def get_bbr(df,num):
+    '''
+    This function calls data, that scapes bbr.
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr, links and geo
+        num (int): number of threads to divide the task into
+    Returns:
+        Same DataFrame but add a column with bbr columns
+    '''    
+    df_new = pd.DataFrame() # data container
+    for j in tqdm(chunker(df,num)): # chunks
+        dat = treads(j,data) # scrape 
+        # stoere data
+        for i in dat:
+            for k, j in i.iterrows():
+                df_new = df_new.append(j, ignore_index=True) # append data
+    return df_new
+
+
+
+def format(df):
+    '''
+    This function create new formats for the addr column and creates one for zip codes and town
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr, links
+    Returns:
+        Same DataFrame but add a column with more addr columns
+    '''    
+    df['by'] = df.apply(lambda row: row['Adresse'].split(',')[-1], axis = 1) # fist loop to create find town by splt addr
+    df['by'] = df.apply(lambda row: row['by'].split(' '), axis = 1) # secound loop to find town by splitting on space
+    hej = df.by # selecting by
+    l = [] # store data
+    for i in hej:
+        if len(i[-2])==1: 
+            temp = i[-3:-1]
+            by = f'{temp[0]} {temp[1]}' # finding by
+
+        else: by = i[-2]
+        l.append(by) # appending 
+    df['by'] = l # storing
+
+    df['postnr'] = df.apply(lambda row: row['Adresse'].split(',')[-1], axis = 1) # finding zip codes by split addr by ,
+    df['postnr'] = df.apply(lambda row: row['postnr'].split(' '), axis = 1) # splitting by space
+    df['ad'] = df.apply(lambda row: row['Adresse'].split(',')[0], axis = 1) # store first par of addr before ,
+    hej = df.postnr # selecting zip code
+    l = [] # container
+    for i in hej: # find the 4 digits that is the zipcode using regex
+        temp = []
+        for j in i:
+            if len(re.sub("\D", "", j))==4:
+                temp.append(j)
+            else: pass
+        if len(temp) > 1:
+            l.append(temp[-1])
+        elif len(temp) == 1:
+            l.append(temp[0])
+        elif len(temp) == 0:
+            l.append(np.nan)
+        else: pass
+    df['postnr'] = l # store zip codes
+
+    # Next addr format
+    df['ad2'] = df.apply(lambda row: row['Adresse'].split(' '), axis = 1) # split by space
+    hej = df.ad2 # select the col
+    l = [] # data container
+    for i in hej:
+        l.append(" ".join(i[1:-4])) # get the last parts
+    df['ad2'] = l # store the values
+    # next format
+    next_ad  =[] # data container
+    for i in df['Adresse']:
+        if (i.__contains__(',')): # addr on the left and right has this ,
+            split = i.split(',')
+            next_ad.append(split[0])
+        else:
+            split = i.split(' ') # normal spilt and join on last parts
+            next_ad.append(" ".join(split[:-3]))
+    df['next_ad'] = next_ad
+
+    # geo addr, next ad and zip codes
+    geo_ad =[] # container
+    for i, j in zip(df.next_ad,df.postnr):
+        geo_ad.append(f'{i} {j}') # append
+    df['geo_ad'] = geo_ad # store
+    return df
+
+def geo(df):
+    '''
+    This function find geo location 
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr, links
+    Returns:
+        Same DataFrame but add a column with geo location
+    '''    
+    df_new = pd.DataFrame() # initialize data container
+    Nomi_locator = Nominatim(user_agent="user_agent")  # settings for Nomi_locator
+    #RateLimiter(Nomi_locator.geocode, min_delay_seconds=1,  error_wait_seconds= 10) # update delays and waits
+
+    for i, j in df.iterrows():
+        page = ''
+        while page == '':
+            try:
+                a = j['geo_ad']
+                #get the location detail 
+                location = Nomi_locator.geocode(a[1:], timeout = 10) # find geo location
+                if location is None: # if it does not work
+                    try:
+                        # trying website with geo loaction
+                        driver = webdriver.Chrome(executable_path=r"C:\Users\45238\Documents\Programmering\chromedriver.exe") # open selenium
+                        ActionChains(driver) # Actions
+                        driver.get('https://latitude.to/') # open Url
+                        driver.maximize_window() # max window
+                        driver.implicitly_wait(10) # wait till page loads
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="g-home-location-search"]'))).click() # click seach bar
+                        driver.find_element_by_xpath('//*[@id="g-home-location-search"]').send_keys(a[1:]) # plug in geo_addr
+                        driver.find_element_by_xpath('//*[@id="home-search-results"]/ul/li').click() # click
+                        soup = BeautifulSoup(driver.page_source, 'lxml')# call soup
+                        time.sleep(3) # wait
+                        tab = soup.find_all('div',{'class':'row'}) # find number
+                        tab = str(tab) # as str
+                        non_decimal = re.compile(r'[^\d.]+') # store decimals
+                        lat = float(non_decimal.sub('', tab[32:333])) # find numbers for latitude
+                        log = float(non_decimal.sub('', tab[340:355])) # longitude
+                        cord = (lat,log) # store as cordinates
+                        location = Nomi_locator.reverse(query=(lat, log), exactly_one=False, timeout=5)  # reverse geocode
+                        driver.close() # close selenium
+                    except:
+                        cord = None # none is found bad luck
+                        location = None
+                else:
+                    cord = (float(location.latitude), float(location.longitude)) # use the geopy solution
+                # store results
+                new_row = {'Adresse':j.Adresse,  'href':j.href, 'hrefbbr': j.hrefbbr, 'geo_code':  cord, 'geo_location_raw' : location}
+                df_new = df_new.append(new_row, ignore_index=True)      
+                break
+            except Exception as e:
+                if hasattr(e, 'message'):
+                    print(e.message)
+                else:
+                    print(e)
+                time.sleep(5)
+                continue
+    return df_new
+
+def run_the_program(start = 1000, end = 9999, interval = 50, threads = 10, mail= True, test = False, test_size = 0, grundskylds_periode = True):
+    '''
+    Runs the data scaper 
+
+    Args: 
+        start (int): starting value for zip code 1000 is the lowest
+        end (int): where to stop the program last zip code is 9999
+        interval (int): how many zip codes to scrape i each iteration
+        threads (int): number of threads in computation of brr and hist
+        mail (bool): send csv with interval results
+        test (bool): test the program i.e. 10 bbr links at the time
+    Returns:
+        Dataframe with danish house market data
+    '''    
+    frames = [] # container
+    for i in range(start,end,interval): 
+        try:
+            print('start')
+            df= bolig_salg(i,i+interval-1,) #get links and addr
+            if grundskylds_periode:
+                df = df.loc[(df['salgsdato'] >= '2007-01-01')]
+            else: pass
+            if test == True: # run a test to see if the program works on a smaller sample
+
+                df = df.sample(n = test_size) 
+            else: pass
+            print('1')
+            print(df.shape)
+            df = get_hist(df, threads) # get links to bbr
+            print('2')
+            print(df.shape)
+            df = format(df) # addr formats
+            print('3')
+            print(df.shape)
+            df = geo(df) #geo location
+            print('4')
+            print(df.shape)
+            df = get_bbr(df,threads) # Bbr info
+            print('5')
+            print(df.shape)
+            if grundskylds_periode:
+                df = df.loc[(df['Salgsdato'] >= '2007-01-01')]
+            print(df.shape)
+            data_name = f'Final_{i}_{i+interval-1}.csv' # name to csv
+            print('6')
+            df.to_csv(data_name) # save csv
+            print('7')
+            frames.append(df) #store csv
+            print('8')
+            if mail: # send mail with data
+                send_mail(data_name)
+            else: pass
+            print('9')
+        except Exception as e:
+    
+            if hasattr(e, 'message'):
+                print(e.message)
+            else:
+                print(e)
+            pass
+    print('final')
+    df_final = pd.concat(frames) # final dataset
+    print('done')
+    return df_final
+
+df = run_the_program(start = 1930, end = 9999, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+
+
+df.to_csv('test_file.csv')
