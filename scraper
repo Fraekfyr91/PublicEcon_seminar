@@ -1,0 +1,634 @@
+# Import warnings library
+from distutils.util import subst_vars
+import warnings
+
+from sympy import Q 
+# Set action = "ignore" to ignore warnings
+warnings.filterwarnings(action= 'ignore')
+
+from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.keys import Keys
+import re
+from bs4 import BeautifulSoup, SoupStrainer
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import *
+
+from geopy.geocoders import Nominatim
+from geopy.extra.rate_limiter import RateLimiter
+import pandas as pd
+import time
+from datetime import datetime
+import requests
+import numpy as np
+from lxml import html
+from tqdm import tqdm
+from threading import Thread
+import smtplib
+import imghdr
+
+import random
+
+
+def send_mail(data_name):
+    from email.message import EmailMessage
+    EMAIL_ADDRESS = 'fraekfyr91@gmail.com'
+    EMAIL_PASSWORD = 'Anemone123'
+
+    msg = EmailMessage()
+    msg['Subject'] = 'Updates'
+    msg['From'] = EMAIL_ADDRESS
+    msg['To'] = 'laustruplasse@gmail.com'
+    msg.set_content('Updates from scraper')
+
+    with open(data_name, 'rb') as f:
+        file_data = f.read()
+        file_type = 'csv'
+        file_name = f.name
+
+    msg.add_attachment(file_data, maintype= file_type, subtype= file_type, filename = file_name)
+    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+
+        smtp.login(EMAIL_ADDRESS ,EMAIL_PASSWORD )
+        smtp.send_message(msg)
+        
+        
+#def rotate
+def headers():
+    user_agent_list = [
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:77.0) Gecko/20100101 Firefox/77.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:77.0) Gecko/20100101 Firefox/77.0',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36',
+        ]
+    user_agent = random.choice(user_agent_list)
+    #Set the headers 
+    headers = {'User-Agent': user_agent}
+    return headers
+
+def remove_punctuation(pattern,phrase): 
+    '''   
+
+    Args: 
+        Regular expression pattern
+        
+        String phrase
+    Returns:
+        String phrase with out punctation
+    '''
+    
+    
+    for pat in pattern: 
+        return(re.findall(pat,phrase)) 
+def month_con(m):
+    '''   
+
+    Args: 
+        List or string of mounth indication by first three letters
+    Returns:
+        list or string where the mounth is translated into the mounth index
+    '''    
+    if m.__contains__('jan'):
+        m = '01'
+    elif m.__contains__('feb'):
+        m = '02'
+    elif m.__contains__('mar'):
+        m = '03'
+    elif m.__contains__('apr'):
+        m = '04'
+    elif m.__contains__('maj'):
+        m = '05'
+    elif m.__contains__('jun'):
+        m = '06' 
+    elif m.__contains__('jul'):
+        m = '07'
+    elif m.__contains__('aug'):
+        m = '08'
+    elif m.__contains__('sep'):
+        m = '09'
+    elif m.__contains__('okt'):
+        m = '10'
+    elif m.__contains__('nov'):
+        m = '11'
+    elif m.__contains__('dec'):
+        m = '12'
+    else:
+        pass
+    return m    
+def chunker(seq, size):
+    '''
+    Chunks dataframe into fewer rows
+
+    Args: 
+        seq (Pandas DataFrame): pandas dataframe containing addr and links
+        size (int): chunk lenght 
+    Returns:
+        dataframe with size as number of rows
+    '''
+    return (seq[pos:pos + size] for pos in range(0, len(seq), size))
+
+def tim(result, index, fun, j):
+    '''
+        Create a result of the threads
+    Args:
+        >> result (list): Empty list with len j number of rows
+        >> j (Pandas Dataframe): Should be a Pandas DataFrame of a feasible chunck size.
+        >> index (int): Iteration number from loop to store the result and call row number
+        >> fun (function): The objective function to compute
+    Returns:
+        updated result with computed values
+    '''
+    result[index] = fun(j.iloc[index])
+def treads(j, fun):
+    '''
+    Create threads that runs a function in j dimentions at the same time.
+    Args:
+        >> j (Pandas Dataframe): Should be a Pandas DataFrame of a feasible chunck size.
+        >> fun (function): The objective function to compute
+
+    Returns:
+        The computed function
+    '''
+    threads = [None] * j.shape[0] # initialize the number of threads as the number of rows in j
+    results = [None] * j.shape[0] # initialize the result as the number of rows in j
+
+    for i in range(len(threads)):
+        threads[i] = Thread(target=tim, args=(results, i, fun, j)) # create threads, target tim takes the objective funtion as argument
+        threads[i].start() # starts thread
+
+    for i in range(len(threads)):
+        threads[i].join() # Join treads such that the result can be returned together
+
+    return results
+
+def parse_stuff(lst):
+    '''
+    Helping function to clean data
+    Args:
+            >> lst (list): list of output from scaper
+        Returns:
+            String with last words from string.
+    '''
+    for i in lst:
+        l=i[0].split(' ')
+           
+        return ' '.join(l[3:-1])
+
+
+def repeat(n, zip_start, zip_end, url):
+    '''   
+    Args: 
+        Int
+    Returns:
+        Repeat of a function n number of times
+    '''
+
+    #creating data containers
+    adresse = [] 
+    href = []
+    salgsdato = []
+    count = 0
+    # open selenium and setting options
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(options=chrome_options)
+    #driver
+    driver = webdriver.Chrome(executable_path=r"C:\Users\45238\Documents\Programmering\chromedriver.exe")
+    #open url
+    driver.get(url)
+    #accept cookies
+    driver.find_element_by_xpath('//*[@id="coiPage-1"]/div[2]/div[1]/button[2]').click()
+
+    while count < n+1:
+        time.sleep(1)
+        soup = BeautifulSoup(driver.page_source, 'lxml')
+        #find all adresses
+        adr = soup.find_all('a',{'class':'text-primary font-weight-bolder text-left'})
+ 
+        for i in adr:    
+            adresse.append(i.text)#append addr
+        ref =  soup.find_all('a', href=True) # find links
+        for i in ref:
+            if i['href'][:6] == '/salg/':
+                href.append('https://www.boliga.dk/'+str(i['href'])) #append link
+            else: pass
+
+                #find all rows    
+        row = soup.find_all('td',{'class':'table-col text-center'})
+        temp_list = []
+        #selecting columns
+        for i in row:
+            element = i.text   
+            #spilt by line shift
+            cell = re.split('\n', element)
+            temp_list.append(cell)
+
+        for i in temp_list[1::7]:
+            sal = str(i)
+            #removing punctation
+            sal= "".join(remove_punctuation(['[^!.?]+'],sal))
+            #splitting the sttring by space
+            sal = sal.split(' ')
+            #joining strings by a -
+            joined_string = "-".join(sal)
+            date= joined_string[2:12]
+            salgsdato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+
+        count += 1
+        try:
+            #click the next bottom
+            search = driver.find_element_by_xpath('/html/body/app-root/app-scroll-position-restoration/app-main-layout/app-sold-properties-list/div[3]/div/div/app-pagination/div/div[4]/a')
+            search.click()
+
+        except: pass
+    return adresse, href, salgsdato
+
+
+def bolig_salg(zip_start, zip_end):
+    
+    '''
+    Args: 
+        Start and end zip codes
+    Returns:
+        Pandasdataframe with addr and link
+    '''    
+    
+    #the website
+    url = 'https://www.boliga.dk/salg/resultater?zipcodeFrom=' + str(zip_start) + '&zipcodeTo=' + str(zip_end) + '&street=&page=1&sort=date-d'
+    #soup 
+    
+    soup = BeautifulSoup(requests.get(url).text, 'lxml')
+    # text in next bottom
+    buttoms = soup.find_all('a',{'class':'page-button'})
+    try:
+        condition = int(buttoms[-2].text) # find the number of pages
+    except:
+        condition = 0 # else no more pages
+    #call the scaper
+    adresse, href, salgsdato =repeat(condition, zip_start = zip_start, zip_end = zip_end, url = url)
+    #creating the dataframe 
+    df = pd.DataFrame(list(zip(adresse, href, salgsdato )),
+               columns=['Adresse', 'href', 'salgsdato'])
+    df.drop_duplicates()
+    return df
+
+
+def hist(j):
+    '''
+    Args: 
+        j (Pandas DataFrame): pandas dataframe containing addr and links
+    Returns:
+        Same DataFrame but add a column with links to bbr page
+    '''    
+    df_new = pd.DataFrame() # initialize dataframe
+    page = ''
+    while page == '':
+        try:
+            
+            # call soup
+            soup = BeautifulSoup(requests.get(j.href, headers=headers()).text, 'lxml')
+            # find rows
+            #row = soup.find_all('tr',{'class':'table-row'})
+            # get hrefs for BBR info
+            ref =  soup.find_all('a', href=True) #find links
+            for i in ref:
+
+                if i['href'][:9] == '/bbrinfo/':
+                    href2 = 'https://www.boliga.dk/'+str(i['href'])
+
+
+                else: pass
+
+
+            BOLIGTYPE, KØKKENFORHOLD, ANVENDELSE, BADEFORHOLD, ENHEDSAREAL, ANTAL_BADEVÆRELSER, BEBOELSESAREAL, TOILETFORHOLD, VÆRELSER, ANTAL_TOILETTER, ENERGIKODE = data(href2)  
+            
+            tab= soup.find_all('td',{'table-col'}) # find table
+            Omregningsdato = []
+            Salgspris = []
+            ty = [] # data container
+            for i in tab:
+
+                cell = re.split('\n', i.text) # split by new line
+                cell = cell[0]
+                if cell[:10] ==' Salgspris':
+                    Salgspris.append(float( re.sub("\D", "", cell)))
+
+                elif cell[:10] == ' Salgsdato':
+                    try:
+                        date = remove_punctuation(['[^!.?]+'],cell[10:12])[0]+'-'+ month_con(remove_punctuation(['[^!.?]+'],cell[12:17])[0])+'-'+ cell[-4:]
+                        Omregningsdato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+                    except:
+                        date = remove_punctuation(['[^!.?]+'],cell[11:13])[0]+'-'+ month_con(remove_punctuation(['[^!.?]+'],cell[13:18])[0])+'-'+ cell[-4:]
+                        Omregningsdato.append(datetime.strptime(str(date), '%d-%m-%Y'))
+                elif cell[:12] == ' Handelstype':
+                    ty.append(cell)
+
+            for i, l, k in zip(Omregningsdato,Salgspris,ty): # append values to new row
+                
+                new_row = {'Adresse':j.Adresse , 'Købesum':l, 'Salgsdato':i, 'Salgstype':k, 'href':j.href, 'hrefbbr': href2,'geo_code':  j.geo_code, 'geo_location_raw' : str(j.geo_location_raw), 'kommunenummer': j.kommunenummer, 'boligtype': BOLIGTYPE, 'køkkenforhold':KØKKENFORHOLD,'anvendelse': ANVENDELSE,'badeforhold': BADEFORHOLD, 'enhedsareal':ENHEDSAREAL, 'antal_badeværelser':ANTAL_BADEVÆRELSER,'beboelsesareal': BEBOELSESAREAL, 'toiletforhold':TOILETFORHOLD, 'værelser':VÆRELSER, 'antal_toiletter':ANTAL_TOILETTER, 'energikode':ENERGIKODE}
+                df_new = df_new.append(new_row, ignore_index=True)
+            df_new.drop_duplicates()
+            break
+        except Exception as e:
+    
+            if hasattr(e, 'message'):
+                print(e.message)
+            else:
+                print(e)
+    
+            time.sleep(5)
+            continue
+    return df_new
+
+    
+def get_hist(df, num, selected_vars = False):
+    '''
+    This function calls hist, that scapes the link for bbr.
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr and links
+        num (int): number of threads to divide the task into
+    Returns:
+        Same DataFrame but add a column with links to bbr page
+    '''    
+    df_new = pd.DataFrame() # new container
+    for j in tqdm(chunker(df,num)): # chunk the dataframe into num amount of rows
+        dat = treads(j, hist) # create threads and scrape
+        for i in dat:
+            for k, j in i.iterrows():
+                df_new = df_new.append(j, ignore_index=True) # unpacking solution and store in container
+
+    return df_new
+
+def data(ref):
+    '''
+    This function scapes bbr tables
+
+    Args: 
+        ref (Str): link to bbr info
+    Returns:
+        BBR variables
+    '''    
+
+    soup = BeautifulSoup(requests.get(ref, headers=headers()).text, 'lxml')
+    # First table
+    tab1 = soup.find_all('div',{'class':'col-md-6 column'})
+    temp_list = [] # data container
+    for i in tab1:
+        cell = re.split('\n', i.text) # split by new line
+        temp_list.append(cell) # append cells
+    # get the data using the helping function parse_stuff
+    BOLIGTYPE = parse_stuff(temp_list[0::11])
+    KØKKENFORHOLD = parse_stuff(temp_list[1::11])
+    ANVENDELSE = parse_stuff(temp_list[2::11])
+    BADEFORHOLD = parse_stuff(temp_list[3::11])
+    ENHEDSAREAL = re.sub("\D", "", parse_stuff(temp_list[4::11]))
+    ANTAL_BADEVÆRELSER = parse_stuff(temp_list[5::11])
+    BEBOELSESAREAL =re.sub("\D", "", parse_stuff(temp_list[6::11])) 
+    TOILETFORHOLD = parse_stuff(temp_list[7::11])
+    VÆRELSER = parse_stuff(temp_list[8::11])
+    ANTAL_TOILETTER = parse_stuff(temp_list[9::11])
+    ENERGIKODE = parse_stuff(temp_list[10::11])
+
+    return BOLIGTYPE, KØKKENFORHOLD, ANVENDELSE, BADEFORHOLD, ENHEDSAREAL, ANTAL_BADEVÆRELSER, BEBOELSESAREAL, TOILETFORHOLD, VÆRELSER, ANTAL_TOILETTER, ENERGIKODE
+
+
+def format(df):
+    '''
+    This function create new formats for the addr column and creates one for zip codes and town
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr, links
+    Returns:
+        Same DataFrame but add a column with more addr columns
+    '''    
+    df['by'] = df.apply(lambda row: row['Adresse'].split(',')[-1], axis = 1) # fist loop to create find town by splt addr
+    df['by'] = df.apply(lambda row: row['by'].split(' '), axis = 1) # secound loop to find town by splitting on space
+    hej = df.by # selecting by
+    l = [] # store data<
+    for i in hej:
+        if len(i[-2])==1: 
+            temp = i[-3:-1]
+            by = f'{temp[0]} {temp[1]}' # finding by
+
+        else: by = i[-2]
+        l.append(by) # appending 
+    df['by'] = l # storing
+
+    df['postnr'] = df.apply(lambda row: row['Adresse'].split(',')[-1], axis = 1) # finding zip codes by split addr by ,
+    df['postnr'] = df.apply(lambda row: row['postnr'].split(' '), axis = 1) # splitting by space
+    df['ad'] = df.apply(lambda row: row['Adresse'].split(',')[0], axis = 1) # store first par of addr before ,
+    hej = df.postnr # selecting zip code
+    l = [] # container
+    for i in hej: # find the 4 digits that is the zipcode using regex
+        temp = []
+        for j in i:
+            if len(re.sub("\D", "", j))==4:
+                temp.append(j)
+            else: pass
+        if len(temp) > 1:
+            l.append(temp[-1])
+        elif len(temp) == 1:
+            l.append(temp[0])
+        elif len(temp) == 0:
+            l.append(np.nan)
+        else: pass
+    df['postnr'] = l # store zip codes
+
+    # Next addr format
+    df['ad2'] = df.apply(lambda row: row['Adresse'].split(' '), axis = 1) # split by space
+    hej = df.ad2 # select the col
+    l = [] # data container
+    for i in hej:
+        l.append(" ".join(i[1:-4])) # get the last parts
+    df['ad2'] = l # store the values
+    # next format
+    next_ad  =[] # data container
+    for i in df['Adresse']:
+        if (i.__contains__(',')): # addr on the left and right has this ,
+            split = i.split(',')
+            next_ad.append(split[0])
+        else:
+            split = i.split(' ') # normal spilt and join on last parts
+            next_ad.append(" ".join(split[:-3]))
+    df['next_ad'] = next_ad
+
+    # geo addr, next ad and zip codes
+    geo_ad =[] # container
+    for i, j in zip(df.next_ad,df.postnr):
+        geo_ad.append(f'{i} {j}') # append
+    df['geo_ad'] = geo_ad # store
+    return df
+
+def geo(df):
+    '''
+    This function find geo location 
+
+    Args: 
+        df (Pandas DataFrame): pandas dataframe containing addr, links
+    Returns:
+        Same DataFrame but add a column with geo location
+    '''    
+    df_new = pd.DataFrame() # initialize data container
+    Nomi_locator = Nominatim(user_agent=headers())  # settings for Nomi_locator
+    #RateLimiter(Nomi_locator.geocode, min_delay_seconds=1,  error_wait_seconds= 10) # update delays and waits
+
+    for i, j in tqdm(df.iterrows()):
+        a = j['geo_ad']
+        page = ''
+        while page == '':
+            try:
+                responce = requests.get(f'https://api.dataforsyningen.dk/adresser?q={a}&struktur=mini', headers=headers(),timeout = 1)
+                res = responce.json()[0]
+                knr = res['kommunekode']
+                log = res['x']
+                lat = res['y']
+                cord = (lat,log)
+                location = res['betegnelse']
+
+            except:
+                try:
+                    #get the location detail 
+                    location = Nomi_locator.geocode(a, timeout = 1) # find geo location
+                    cord = (float(location.latitude), float(location.longitude)) # use the geopy solution
+                    responce = requests.get(f'https://api.dataforsyningen.dk/postnumre/reverse?x={cord[1]}&y={cord[0]}',  headers=headers())
+                    res = responce.json()
+                    kom = res['navn']
+                    for i in res['kommuner']:
+                        if i['navn'] == kom:
+                            knr = i['kode']
+                            
+                            break
+                        else: knr = np.nan
+                except:
+                    try:
+                        
+                        driver = webdriver.Chrome(executable_path=r"C:\Users\45238\Documents\Programmering\chromedriver.exe") # open selenium
+                        ActionChains(driver) # Actions
+                        driver.get('https://latitude.to/') # open Url
+                        WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,'//*[@id="g-home-location-search"]'))).click() # click seach bar
+                        driver.find_element_by_xpath('//*[@id="g-home-location-search"]').send_keys(a) # plug in geo_addr
+                        driver.find_element_by_xpath('//*[@id="home-search-results"]/ul/li').click() # click
+                        soup = BeautifulSoup(driver.page_source, 'lxml')# call soup
+                        driver.close() # close selenium
+                        tab = soup.find_all('div',{'class':'row'}) # find number
+                        tab = str(tab) # as str
+                        non_decimal = re.compile(r'[^\d.]+') # store decimals
+                        lat = float(non_decimal.sub('', tab[32:333])) # find numbers for latitude
+                        log = float(non_decimal.sub('', tab[340:355])) # longitude
+                        cord = (lat,log) # store as cordinates
+                        location = a
+                        responce = requests.get(f'https://api.dataforsyningen.dk/postnumre/reverse?x={cord[1]}&y={cord[0]}',  headers=headers())
+                        
+                        try:
+                            res = responce.json()
+                            kom = res['navn']
+                            for i in res['kommuner']:
+                                if i['navn'] == kom:
+                                    knr = i['kode']
+                                   
+                                    
+                                
+                        except:
+                            cord = np.nan # none is found bad luck
+                            location = np.nan
+                            knr = np.nan
+
+                    except:
+                        cord = np.nan # none is found bad luck
+                        location = np.nan
+                        knr = np.nan
+            # store results
+            new_row = {'Adresse':j.Adresse,  'href':j.href, 'geo_code':  cord, 'geo_location_raw' : location, 'kommunenummer': knr}
+            df_new = df_new.append(new_row, ignore_index=True)      
+            break
+
+    return df_new
+
+def run_the_program(start = 1000, end = 9999, interval = 50, threads = 10, mail= True, test = False, test_size = 0, grundskylds_periode = True):
+    '''
+    Runs the data scaper 
+
+    Args: 
+        start (int): starting value for zip code 1000 is the lowest
+        end (int): where to stop the program last zip code is 9999
+        interval (int): how many zip codes to scrape i each iteration
+        threads (int): number of threads in computation of brr and hist
+        mail (bool): send csv with interval results
+        test (bool): test the program i.e. 10 bbr links at the time
+        test_size (int): number of randomly picked properties per iteration
+        grundskylds_periode (bool): Only select sales after 2007
+        selected_vars (bool): select only a subset of variables
+    Returns:
+        Dataframe with danish house market data
+    '''    
+    frames = [] # container
+    for i in range(start,end,interval): 
+        try:
+            print('start')
+            df= bolig_salg(i,i+interval-1,) #get links and addr
+            if grundskylds_periode:
+                df = df.loc[(df['salgsdato'] >= '2007-01-01')]
+            else: pass
+            if test == True: # run a test to see if the program works on a smaller sample
+
+                df = df.sample(n = test_size) 
+            else: pass
+            print('1')
+            print(df.shape)
+            df = format(df) # addr formats
+            print('2')
+            print(df.shape)
+            df = geo(df) #geo location
+            print(f'3, {df.shape[0]/5}')
+            print(df.shape)
+
+            df = get_hist(df, threads)
+        
+            print('4')
+            print(df.shape)
+            if grundskylds_periode:
+                df = df.loc[(df['Salgsdato'] >= '2007-01-01')]
+            print(df.shape)
+            data_name = f'Final_{i}_{i+interval-1}.csv' # name to csv
+            print('5')
+            df.to_csv(data_name) # save csv
+            print('6')
+            frames.append(df) #store csv
+            print('7')
+            if mail: # send mail with data
+                send_mail(data_name)
+            else: pass
+            print('8')
+        except Exception as e:
+    
+            if hasattr(e, 'message'):
+                print(e.message)
+            else:
+                print(e)
+            pass
+    print('final')
+    df_final = pd.concat(frames) # final dataset
+    print('done')
+    return df_final
+
+
+df = run_the_program(start = 1300, end = 1320, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+
+df = run_the_program(start = 2650, end = 2660, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+df = run_the_program(start = 2700, end = 2701, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+
+df = run_the_program(start = 2720, end = 2730, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+df = run_the_program(start = 2760, end = 2860, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+
+df = run_the_program(start = 3000, end = 9999, interval = 10, threads = 5, mail= True, test = False, test_size = 20, grundskylds_periode = True)
+
+
+
+df.to_csv('test_file.csv')
